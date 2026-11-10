@@ -25,12 +25,12 @@
 
 namespace local_chronifysupport;
 
+#[\PHPUnit\Framework\Attributes\CoversClass(anonymous_endpoint::class)]
 /**
  * Tests for the helpers of the public endpoints.
  *
  * @covers \local_chronifysupport\anonymous_endpoint
  */
-#[\PHPUnit\Framework\Attributes\CoversClass(anonymous_endpoint::class)]
 final class anonymous_endpoint_test extends \advanced_testcase {
     /**
      * Without a complete configuration the endpoints report "not configured".

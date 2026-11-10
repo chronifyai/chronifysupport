@@ -25,12 +25,12 @@
 
 namespace local_chronifysupport;
 
+#[\PHPUnit\Framework\Attributes\CoversClass(connection_defaults::class)]
 /**
  * Tests for the default connection values.
  *
  * @covers \local_chronifysupport\connection_defaults
  */
-#[\PHPUnit\Framework\Attributes\CoversClass(connection_defaults::class)]
 final class connection_defaults_test extends \advanced_testcase {
     /**
      * A new installation comes with the connection settings filled in.

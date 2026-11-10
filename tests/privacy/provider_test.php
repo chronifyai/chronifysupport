@@ -27,12 +27,12 @@ namespace local_chronifysupport\privacy;
 
 use core_privacy\local\metadata\collection;
 
+#[\PHPUnit\Framework\Attributes\CoversClass(provider::class)]
 /**
  * Tests for the privacy provider.
  *
  * @covers \local_chronifysupport\privacy\provider
  */
-#[\PHPUnit\Framework\Attributes\CoversClass(provider::class)]
 final class provider_test extends \core_privacy\tests\provider_testcase {
     /**
      * The two external locations are declared and every privacy string exists.
