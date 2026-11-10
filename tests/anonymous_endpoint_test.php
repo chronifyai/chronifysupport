@@ -27,6 +27,8 @@ namespace local_chronifysupport;
 
 /**
  * Tests for the helpers of the public endpoints.
+ *
+ * @covers \local_chronifysupport\anonymous_endpoint
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(anonymous_endpoint::class)]
 final class anonymous_endpoint_test extends \advanced_testcase {

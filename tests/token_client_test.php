@@ -27,6 +27,8 @@ namespace local_chronifysupport;
 
 /**
  * Tests for the Tier-1 / Tier-2 token client.
+ *
+ * @covers \local_chronifysupport\token_client
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(token_client::class)]
 final class token_client_test extends \advanced_testcase {

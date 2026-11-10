@@ -27,6 +27,8 @@ namespace local_chronifysupport;
 
 /**
  * Tests for the opt-in AI Agent web service setup.
+ *
+ * @covers \local_chronifysupport\ai_agent_provisioner
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(ai_agent_provisioner::class)]
 final class ai_agent_provisioner_test extends \advanced_testcase {

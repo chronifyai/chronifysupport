@@ -24,8 +24,6 @@
 
 namespace local_chronifysupport;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Moodle 4.4+ Hooks API callbacks.
  *
@@ -371,6 +369,8 @@ class hook_callbacks {
      * non-plugin-page surface as the button itself. Anonymous (login-page)
      * visitors are out of scope for this pass — there is no course page to
      * navigate between there anyway.
+     *
+     * @param \core\hook\output\before_footer_html_generation $hook The hook being dispatched.
      */
     protected static function maybe_inject_tracking(\core\hook\output\before_footer_html_generation $hook): void {
         global $COURSE, $PAGE, $USER, $CFG;
@@ -481,6 +481,8 @@ class hook_callbacks {
      * configured, exactly like maybe_inject_tracking() above -- this reuses
      * that same feature's supabase_url/supabase_anon_key settings rather
      * than needing its own.
+     *
+     * @param \core\hook\output\before_footer_html_generation $hook The hook being dispatched.
      */
     protected static function maybe_inject_visitor_beacon(\core\hook\output\before_footer_html_generation $hook): void {
         global $COURSE, $PAGE;
@@ -613,6 +615,18 @@ class hook_callbacks {
      *
      * `keepalive: true` lets the request survive the page unload that
      * happens immediately after this fires on a normal link click/navigation.
+     *
+     * @param string $supabaseurl Supabase project URL.
+     * @param string $supabaseanonkey Supabase anon key.
+     * @param string $clientid Client ID of this installation.
+     * @param int $courseid Current course ID (0 if none).
+     * @param string|null $pagetitle Current page title.
+     * @param string $pageurl Current page URL.
+     * @param string|null $activityname Current activity name, if any.
+     * @param string|null $coursename Current course name, if any.
+     * @param string|null $role Role of the user in the current context, if known.
+     * @param string|null $moodleversion Moodle release string, if known.
+     * @return string The script source.
      */
     protected static function build_tracking_js(
         string $supabaseurl,
@@ -702,6 +716,15 @@ class hook_callbacks {
      * existing live page-tracking script (build_tracking_js() above) picks
      * up their session on the very next page view for free, with no
      * changes needed there.
+     *
+     * @param string $supabaseurl Supabase project URL.
+     * @param string $supabaseanonkey Supabase anon key.
+     * @param string $clientid Client ID of this installation.
+     * @param \moodle_url $acceptinviteurl URL of accept_invite.php.
+     * @param int $courseid Current course ID (0 if none).
+     * @param string|null $pagetitle Current page title.
+     * @param string $pageurl Current page URL.
+     * @return string The script source.
      */
     protected static function build_visitor_beacon_js(
         string $supabaseurl,
@@ -1078,6 +1101,12 @@ class hook_callbacks {
      * time, with the panel only actually closing when they explicitly
      * minimize it (via the widget's own minimize control, or the overlay
      * backdrop on narrow viewports).
+     *
+     * @param string $label Button label.
+     * @param \moodle_url $geturl URL of get_help.php for this page.
+     * @param string $loadingtext Text shown while the panel loads.
+     * @param string $loadingslowtext Text shown when loading takes long.
+     * @return string The script source.
      */
     protected static function build_authenticated_js(
         string $label,
@@ -1335,6 +1364,17 @@ class hook_callbacks {
      * is still valid, can jump straight to renderWidget() again instead of
      * re-showing the pre-chat form (which would otherwise defeat the point
      * of staying connected while browsing the site).
+     *
+     * @param string $label Button label.
+     * @param string $supabaseurl Supabase project URL.
+     * @param string $supabaseanonkey Supabase anon key.
+     * @param string $clientid Client ID of this installation.
+     * @param string|null $pagetitle Current page title.
+     * @param string $pageurl Current page URL.
+     * @param string $helpdeskbaseurl Help desk base URL.
+     * @param string $loadingtext Text shown while the panel loads.
+     * @param string $loadingslowtext Text shown when loading takes long.
+     * @return string The script source.
      */
     protected static function build_anonymous_js(
         string $label,
@@ -2430,6 +2470,15 @@ class hook_callbacks {
      * Messages are only accepted from one of this page's own iframes and
      * only from this site or the helpdesk app origin. Entirely best-effort:
      * any failure leaves the button exactly as it was.
+     *
+     * @param string $activelabel Button label while a chat is active.
+     * @param string $storagekey localStorage key for the last known state.
+     * @param string $helpdeskorigin Origin of the help desk app, for postMessage checks.
+     * @param string $offlinelabel Label shown when the team is offline.
+     * @param string $presenceendpoint Supabase project URL for the availability lookup.
+     * @param string $presenceanonkey Supabase anon key for the availability lookup.
+     * @param string $presenceclientid Client ID of this installation.
+     * @return string The script source.
      */
     protected static function build_chat_state_js(
         string $activelabel,
@@ -2704,6 +2753,10 @@ LHDJS;
      * with the OLD cached language file while the NEW code is already
      * running; asking get_string() for a string that is not in that cache
      * yet prints a debugging notice. string_exists() avoids that.
+     *
+     * @param string $identifier String identifier in this plugin.
+     * @param string $fallback English text used when the string is not available.
+     * @return string
      */
     public static function string_or(string $identifier, string $fallback): string {
         if (get_string_manager()->string_exists($identifier, 'local_chronifysupport')) {

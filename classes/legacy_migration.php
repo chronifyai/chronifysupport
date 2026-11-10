@@ -24,8 +24,6 @@
 
 namespace local_chronifysupport;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * One-time, best-effort migration from the plugin's previous name (local_helpdesk).
  *

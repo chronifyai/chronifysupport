@@ -27,6 +27,8 @@ namespace local_chronifysupport;
 
 /**
  * Tests for the default connection values.
+ *
+ * @covers \local_chronifysupport\connection_defaults
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(connection_defaults::class)]
 final class connection_defaults_test extends \advanced_testcase {

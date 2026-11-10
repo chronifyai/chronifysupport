@@ -120,6 +120,8 @@ class token_client {
      * to clear the pending-merge cookie or leave it for a retry on the next
      * page view.
      *
+     * @param string $anonexternaluserid External user id of the anonymous identity (anon:...).
+     * @param string $realexternaluserid External user id of the real Moodle user.
      * @throws \moodle_exception on any failure (missing config, network, rejected by server, etc).
      */
     public static function merge_anonymous_identity(string $anonexternaluserid, string $realexternaluserid): void {
@@ -167,6 +169,11 @@ class token_client {
     /**
      * Step 1 (contract §3): exchange client_id + client_secret for a
      * short-lived, single-use installation_token.
+     *
+     * @param string $baseurl Help desk base URL, without trailing slash.
+     * @param string $clientid Client ID of this installation.
+     * @param string $clientsecret Client secret of this installation.
+     * @return string The installation token.
      */
     protected static function request_tier1_token(string $baseurl, string $clientid, string $clientsecret): string {
         $curl = new \curl();
@@ -197,6 +204,12 @@ class token_client {
     /**
      * Step 2 (contract §4.1): build and sign the user assertion JWT using
      * the installation_token itself as the HMAC-SHA256 key.
+     *
+     * @param string $installationtoken Installation token used as the signing key.
+     * @param \stdClass $user The user the assertion identifies.
+     * @param \stdClass|null $course The current course, if any.
+     * @param string|null $activitycontext Short description of where the user is, if any.
+     * @return string The signed JWT.
      */
     protected static function build_assertion(
         string $installationtoken,
@@ -266,6 +279,11 @@ class token_client {
     /**
      * Step 3 (contract §4.2): exchange installation_token + assertion for
      * a Supabase session token scoped to this end user.
+     *
+     * @param string $baseurl Help desk base URL, without trailing slash.
+     * @param string $installationtoken Installation token from request_tier1_token().
+     * @param string $assertion Signed assertion from build_assertion().
+     * @return array The session (access_token, expires_at, user_id).
      */
     protected static function request_tier2_session(string $baseurl, string $installationtoken, string $assertion): array {
         $curl = new \curl();
@@ -295,6 +313,9 @@ class token_client {
 
     /**
      * RFC 4648 base64url encoding (no padding), as required for JWT segments.
+     *
+     * @param string $data Raw bytes to encode.
+     * @return string The encoded string.
      */
     protected static function base64url_encode(string $data): string {
         return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');

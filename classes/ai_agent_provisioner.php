@@ -35,8 +35,6 @@
 
 namespace local_chronifysupport;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Sets up and maintains the optional AI Agent web service (service, role, service account, token).
  */
@@ -510,6 +508,8 @@ class ai_agent_provisioner {
      * the service. add_external_function_to_service() already checks
      * service_function_exists() internally before inserting, so calling it
      * unconditionally on every run is safe and does not duplicate rows.
+     *
+     * @param int $serviceid ID of the external service.
      */
     protected static function ensure_functions_attached(int $serviceid): void {
         self::require_webservice_libs();
@@ -559,6 +559,8 @@ class ai_agent_provisioner {
      * added by a newer plugin version than the one that originally created
      * this role. assign_capability()'s own existing-row check makes this a
      * no-op for capabilities already granted.
+     *
+     * @param int $roleid ID of the AI Agent role.
      */
     protected static function ensure_role_capabilities_current(int $roleid): void {
         $systemcontext = \context_system::instance();
@@ -585,6 +587,9 @@ class ai_agent_provisioner {
      * site without these plugins, not just skip the certificate part.
      * Checking existence first keeps this entirely optional and
      * side-effect-free wherever the plugins are absent.
+     *
+     * @param int $serviceid ID of the external service.
+     * @param int $roleid ID of the AI Agent role.
      */
     protected static function ensure_optional_functions_and_capabilities(int $serviceid, int $roleid): void {
         global $DB;
@@ -674,6 +679,8 @@ class ai_agent_provisioner {
      * so its *existing* token starts working immediately, no token
      * regeneration needed. A no-op once the account is already manual
      * and not suspended.
+     *
+     * @param \stdClass $user The service account user record.
      */
     protected static function ensure_service_account_can_authenticate(\stdClass $user): void {
         global $DB;
@@ -733,6 +740,9 @@ class ai_agent_provisioner {
     /**
      * Step 4 (assignment): assign the role to the service account at system
      * context, unless it's already assigned.
+     *
+     * @param int $roleid ID of the AI Agent role.
+     * @param int $userid ID of the service account.
      */
     protected static function ensure_role_assigned(int $roleid, int $userid): void {
         global $DB;
@@ -754,6 +764,9 @@ class ai_agent_provisioner {
      * Authorise the service account to use the External service, unless
      * already authorised (only relevant because the service is created with
      * restrictedusers=1).
+     *
+     * @param int $serviceid ID of the external service.
+     * @param int $userid ID of the service account.
      */
     protected static function ensure_authorised_user(int $serviceid, int $userid): void {
         self::require_webservice_libs();
@@ -776,6 +789,9 @@ class ai_agent_provisioner {
      * already exists. Deliberately does not regenerate on every run — a
      * fresh token is only created by regenerate_ai_agent_token.php, acting
      * on an explicit admin click.
+     *
+     * @param int $serviceid ID of the external service.
+     * @param int $userid ID of the service account.
      */
     protected static function ensure_token(int $serviceid, int $userid): void {
         global $DB;

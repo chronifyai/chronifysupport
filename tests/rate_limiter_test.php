@@ -27,6 +27,8 @@ namespace local_chronifysupport;
 
 /**
  * Tests for the request throttle of the public endpoints.
+ *
+ * @covers \local_chronifysupport\rate_limiter
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(rate_limiter::class)]
 final class rate_limiter_test extends \advanced_testcase {
