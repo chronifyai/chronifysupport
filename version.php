@@ -28,8 +28,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_chronifysupport';
-$plugin->version   = 2026110614;       // Version in YYYYMMDDXX format.
+$plugin->version   = 2026111116;       // Version in YYYYMMDDXX format.
 $plugin->requires  = 2024042200;       // Moodle 4.4 (needed for the Hooks API used in classes/hook_callbacks.php).
 $plugin->supported = [404, 501];
 $plugin->maturity  = MATURITY_BETA;
-$plugin->release   = '0.5.3';
+$plugin->release   = '0.5.20';

@@ -44,7 +44,10 @@ use core_privacy\local\request\userlist;
  *
  * Browser-side items used by the widget (not Moodle database data):
  * localStorage keys local_chronifysupport_session, local_chronifysupport_visitor_key and
- * local_chronifysupport_chat_active_*, sessionStorage key local_chronifysupport_panel_open,
+ * local_chronifysupport_chat_active_* and local_chronifysupport_session_uid, sessionStorage keys
+ * local_chronifysupport_panel_open, local_chronifysupport_keep, local_chronifysupport_keep_session,
+ * local_chronifysupport_anon_seen_tab and
+ * local_chronifysupport_session_tab and local_chronifysupport_login_panel,
  * and the cookies local_chronifysupport_visitor_key and local_chronifysupport_pending_anon
  * (the latter is a session cookie, used for at most 30 minutes, and is only
  * set for logged-out visitors who use the login page form).

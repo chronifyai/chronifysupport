@@ -17,9 +17,9 @@
 /**
  * JSON endpoint that silently refreshes the session of the login page "Get Help" form.
  *
- * Companion of get_help_anonymous.php. The widget script resends the same name
- * and email the visitor originally submitted, the external user id is derived
- * from the email exactly as there, and a fresh session token is returned. It
+ * Companion of get_help_anonymous.php. The widget script resends the same name,
+ * email and visitor key the visitor originally submitted, the external user id is
+ * derived from them exactly as there, and a fresh session token is returned. It
  * validates and rate limits independently of get_help_anonymous.php, because it
  * is a separate public endpoint.
  *
@@ -48,6 +48,12 @@ if ($email === '' || mb_strlen($email) > 320) {
     \local_chronifysupport\anonymous_endpoint::fail(400, 'invalid_email');
 }
 
+// The identity is bound to this browser (see derive_identity()), so the key is required.
+$visitorkey = \local_chronifysupport\anonymous_endpoint::visitor_key();
+if ($visitorkey === '') {
+    \local_chronifysupport\anonymous_endpoint::fail(400, 'invalid_visitor_key');
+}
+
 // A looser limit than the first request: an open panel refreshes repeatedly.
 if (!\local_chronifysupport\rate_limiter::allow('refresh', getremoteaddr(), 40)) {
     \local_chronifysupport\anonymous_endpoint::fail(429, 'too_many_requests');
@@ -64,7 +70,7 @@ if (!get_config('local_chronifysupport', 'enable_anonymous_button')) {
 
 // Same derivation as get_help_anonymous.php. It must stay identical, otherwise
 // a refresh would resolve to a different account than the one the visitor started with.
-$externaluserid = 'anon:' . substr(hash('sha256', strtolower($email)), 0, 40);
+$externaluserid = \local_chronifysupport\anonymous_endpoint::derive_identity($email, $visitorkey);
 
 try {
     $session = \local_chronifysupport\token_client::exchange_for_identity(

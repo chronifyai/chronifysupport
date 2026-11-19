@@ -111,11 +111,22 @@ security on the service side.
 
 The widget uses these browser items: localStorage keys
 `local_chronifysupport_session`, `local_chronifysupport_visitor_key` and
-`local_chronifysupport_chat_active_*`; the sessionStorage key
-`local_chronifysupport_panel_open`; and the cookies
+`local_chronifysupport_chat_active_*` and `local_chronifysupport_session_uid`;
+the sessionStorage keys `local_chronifysupport_panel_open`,
+`local_chronifysupport_keep`, `local_chronifysupport_keep_session`, `local_chronifysupport_anon_seen_tab` and
+`local_chronifysupport_session_tab` (a copy of the login-page chat session for the
+current tab) and `local_chronifysupport_login_panel` (set while the visitor has the chat
+panel open on the login page of this tab; removed after logging in); and the cookies
 `local_chronifysupport_visitor_key` and `local_chronifysupport_pending_anon`
 (the latter is a session cookie, valid for at most 30 minutes for merging, and
-is only set for visitors who use the login page form).
+is only set for visitors who use the login page form; it holds a signed
+anonymous identifier, not the email address).
+
+A visitor who uses the login page form is identified by the email address
+together with the visitor key of the browser, signed with a random secret that
+is stored in the plugin settings and never sent to the browser. The same
+visitor can resume the chat in the same browser; entering someone else's email
+address does not open that person's conversation.
 
 Requests for access to or deletion of this data are handled by the
 Chronify.Support operator, using the user's email address.

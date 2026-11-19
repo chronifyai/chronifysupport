@@ -1,5 +1,59 @@
 # Changes
 
+## 0.5.20
+- The chat on the login page is now dropped after 30 minutes in which that page was not seen in the tab, for example when the computer slept or the browser stayed open for a long time. Before, it was dropped only when the browser was closed, so after sleep a visitor could find an old chat that had started earlier. The check runs when the login page loads and again when the page wakes up, and it works on Moodle versions that clear localStorage on every page load (the time is kept in sessionStorage). Signed-in users and the short sign-out continuation (5 minutes) are not affected.
+
+## 0.5.19
+- Signing out of Moodle no longer drops the chat at once: for up to 5 minutes (idle) the login page of the same tab continues the conversation, as in 0.5.17. Unlike before, the chat is kept only while the login page is being used: if the tab is closed and restored, the browser is reopened or the login page was not seen for 10 seconds, the previous user's chat is dropped and a clean chat starts. The window is 5 minutes instead of 20. The login page now also records its last-seen time per tab (`local_chronifysupport_anon_seen_tab`), which works on Moodle versions that clear localStorage on every page load.
+
+## 0.5.18
+- Intermediate build (chat always reset after sign-out); superseded by 0.5.19.
+
+## 0.5.17
+- When the chat panel is opened again automatically while a page loads (for example right after logging in), the page content and the fixed header are now narrowed at once, without the short animation, and the theme is told to re-measure after the page has loaded. Before, some themes kept a header that was too wide, so its right-hand items (profile menu, notifications) were hidden under the panel. Opening the panel with the button works as before.
+
+## 0.5.16
+- A chat panel that the visitor left open on the login page now stays open after logging in, also when a different user was signed in earlier in the same browser (on Moodle versions that keep the browser's local storage between page loads). The previous user's stored chat session and chat state are still dropped as before.
+
+## 0.5.15
+- On the login page the support chat panel no longer closes when the visitor clicks into the username or password field. On screens 900 px wide or more the page stays usable next to the panel (no dimming layer, clicks reach the form) and the panel closes only when the visitor minimizes it. On narrower screens a click outside the panel still closes it, as before. After logging in, the open panel continues as before.
+
+## 0.5.14
+- The chat started from the login page now survives page reloads on Moodle versions that empty the browser's local storage while a page loads. The chat session is also kept for the current tab (sessionStorage) and restored from there; it is cleared in the same situations as before (browser closed, new tab, signed-in user, idle or expired session).
+- The temporary console diagnostics of 0.5.12 and 0.5.13 and the reload exception of 0.5.11 are removed again.
+
+## 0.5.13
+- Temporary diagnostics: on the login page the browser console now also reports, with a call stack, whenever the stored chat session is changed or removed (`[chronify] storage ...`). No change in behaviour. Removed again in the next release.
+
+## 0.5.12
+- Temporary diagnostics: the login page script that decides whether the support chat is kept now writes a few `[chronify]` lines to the browser console. No change in behaviour. Removed again in the next release.
+
+## 0.5.11
+- On the login page, reloading the page (F5) several times in a row no longer drops the support chat. Closing and reopening the browser, opening a new tab and the other existing rules still reset it as before.
+
+## 0.5.10
+- Security: the chat started from the login page is now bound to the browser as well as to the e-mail address. Entering someone else's e-mail address no longer opens that person's conversation; the same visitor using the same browser still resumes the chat. A visitor who uses another browser or device starts a new chat.
+- Security: the cookie that remembers a login-page chat until the visitor logs in is now signed, and only cookies signed by this site are merged into the Moodle account. The old `local_helpdesk_pending_anon` cookie is no longer read. The e-mail address is no longer stored in that cookie.
+- A random signing secret is created in the plugin settings on upgrade (or on first use). It is never sent to the browser.
+- Open login-page chats that were started before this update continue as a new chat; their tickets stay visible to agents.
+
+## 0.5.9
+- On the login page, when the browser has no stored chat, any conversation still attached to this browser on the service side (for example left over from an older session) is now detached once per tab, so the visitor no longer shows as "currently served" without a visible chat.
+
+## 0.5.8
+- When the support chat on the login page is dropped (new tab, browser reopened, 20 minutes without activity, or support session expiry), the browser is now also detached from that conversation on the service side. The visitor then no longer appears as "currently served" for a chat they cannot see, and agent replies reach them by email. This uses the new service function `clear_visitor_conversation`.
+
+## 0.5.7
+- The chat kept on the login page after logout is dropped immediately in any other tab (a new tab, or after the browser is reopened), even within the first 10 seconds.
+
+## 0.5.6
+- After logging out of Moodle, the support chat now stays visible on the login page in the same browser tab, so the person can keep talking to the agent. It is cleared after 20 minutes without mouse or keyboard activity, when the support session expires (it is not renewed after logout), and never survives closing the tab or browser (it only uses sessionStorage).
+- If a different Moodle user logs in, the previous user's stored widget session is dropped, so a conversation is never carried over to another person on a shared computer.
+- A copy of the support session is now kept in the tab (sessionStorage) even when live page tracking is off.
+
+## 0.5.4
+- For logged-out visitors, the previous widget conversation is now reset when the login page is reopened more than 10 seconds after it was closed (was 20 seconds), in browsers that restore the session after closing.
+
 ## 0.5.3
 - The temporary cookie that links a logged-out visitor's chat to their Moodle account after login is now a session cookie and is only used within 30 minutes. On shared computers, a different person who logs in later no longer inherits the previous visitor's conversation.
 

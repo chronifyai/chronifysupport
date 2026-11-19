@@ -19,9 +19,10 @@
  *
  * Used by visitors who are not logged in (for example someone who forgot
  * their password). Accepts a name and email address from the form, derives a
- * stable external user id from the email (so a repeat visitor using the same
- * email resumes the same conversation), runs the Tier-1 / Tier-2 token
- * exchange (see classes/token_client.php) and returns the resulting session.
+ * stable external user id from the email and the visitor key of the browser (so
+ * the same visitor using the same browser resumes the same conversation), runs
+ * the Tier-1 / Tier-2 token exchange (see classes/token_client.php) and returns
+ * the resulting session.
  *
  * It is an AJAX script that starts no Moodle session. Themes that force
  * visitors to log in skip AJAX scripts, so the endpoint stays reachable.
@@ -56,6 +57,12 @@ if ($email === '' || mb_strlen($email) > 320) {
     \local_chronifysupport\anonymous_endpoint::fail(400, 'invalid_email');
 }
 
+// The identity is bound to this browser (see derive_identity()), so the key is required.
+$visitorkey = \local_chronifysupport\anonymous_endpoint::visitor_key();
+if ($visitorkey === '') {
+    \local_chronifysupport\anonymous_endpoint::fail(400, 'invalid_visitor_key');
+}
+
 if (!\local_chronifysupport\rate_limiter::allow('anon', getremoteaddr(), 8)) {
     \local_chronifysupport\anonymous_endpoint::fail(429, 'too_many_requests');
 }
@@ -70,10 +77,10 @@ if (!get_config('local_chronifysupport', 'enable_anonymous_button')) {
     \local_chronifysupport\anonymous_endpoint::fail(403, 'anonymous_button_disabled');
 }
 
-// Deterministic per-email identity: repeat contacts using the same email
-// resolve to the same helpdesk account and conversation, without any cookie
-// or session on this side.
-$externaluserid = 'anon:' . substr(hash('sha256', strtolower($email)), 0, 40);
+// Identity bound to the e-mail address and to this browser: the same visitor
+// using the same browser resumes the same helpdesk account and conversation,
+// while knowing an e-mail address alone gives no access to it.
+$externaluserid = \local_chronifysupport\anonymous_endpoint::derive_identity($email, $visitorkey);
 
 try {
     $session = \local_chronifysupport\token_client::exchange_for_identity(
@@ -94,11 +101,8 @@ try {
 // carries its own issue time so the merge only happens within a short window
 // (see hook_callbacks::PENDING_ANON_MAX_AGE). This prevents a different person
 // who logs in later on a shared computer from inheriting this conversation.
-setcookie('local_chronifysupport_pending_anon', json_encode([
-    'external_user_id' => $externaluserid,
-    'email' => $email,
-    'ts' => time(),
-]), [
+// The value is signed, so a cookie made up by someone else is never merged.
+setcookie('local_chronifysupport_pending_anon', \local_chronifysupport\anonymous_endpoint::pending_cookie_value($externaluserid), [
     'expires' => 0,
     'path' => '/',
     'secure' => is_https(),

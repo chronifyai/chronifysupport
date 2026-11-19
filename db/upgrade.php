@@ -318,5 +318,13 @@ function xmldb_local_chronifysupport_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026110611, 'local', 'chronifysupport');
     }
 
+    if ($oldversion < 2026111106) {
+        // Release 0.5.10: anonymous identities and the merge cookie are signed with a
+        // random secret of this plugin. Create it now (it is also created on first use).
+        // This only stores a value in the plugin's own settings; nothing else is changed.
+        \local_chronifysupport\anonymous_endpoint::identity_key();
+        upgrade_plugin_savepoint(true, 2026111106, 'local', 'chronifysupport');
+    }
+
     return true;
 }

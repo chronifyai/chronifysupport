@@ -383,6 +383,17 @@ try {
         . '  try { window.localStorage.setItem(storageKey, JSON.stringify(current)); '
         . '} catch (e) { /* storage unavailable/full: tracking just stays off */ }'
         . '}'
+        // Tab-only copy of the session (sessionStorage dies with the tab). If the
+        // person logs out of Moodle, the login page can offer this chat again for
+        // a short time (see hook_callbacks::before_footer()). Independent of the
+        // live-tracking setting above. Same short-lived token as the copy above.
+        . 'var keepKey = \'local_chronifysupport_keep_session\';'
+        . 'function keepSession(patch) {'
+        . '  var cur = {};'
+        . '  try { cur = JSON.parse(window.sessionStorage.getItem(keepKey)) || {}; } catch (e) { cur = {}; }'
+        . '  for (var k in patch) { cur[k] = patch[k]; }'
+        . '  try { window.sessionStorage.setItem(keepKey, JSON.stringify(cur)); } catch (e) { /* best-effort */ }'
+        . '}'
         . 'function scheduleRefresh(expiresAtIso) {'
         . '  var expiresAt = new Date(expiresAtIso).getTime();'
         . '  var delay = Math.max(60000, (expiresAt - Date.now()) * 0.8);'
@@ -399,6 +410,7 @@ try {
         . '          expires_at: data.expires_at'
         . '        }, helpdeskOrigin);'
         . '        saveSession({access_token: data.access_token, expires_at: data.expires_at});'
+        . '        keepSession({access_token: data.access_token, expires_at: data.expires_at});'
         . '        scheduleRefresh(data.expires_at);'
         . '      }'
         . '    })'
@@ -410,6 +422,15 @@ try {
         . '  expires_at: ' . \local_chronifysupport\hook_callbacks::js_value($session['expires_at']) . ','
         . '  user_id: ' . \local_chronifysupport\hook_callbacks::js_value($session['user_id']) . ','
         . '  course_id: courseId || null'
+        . '});'
+        . 'keepSession({'
+        . '  access_token: ' . \local_chronifysupport\hook_callbacks::js_value($session['access_token']) . ','
+        . '  expires_at: ' . \local_chronifysupport\hook_callbacks::js_value($session['expires_at']) . ','
+        . '  user_id: ' . \local_chronifysupport\hook_callbacks::js_value($session['user_id']) . ','
+        . '  helpdesk_base_url: ' . \local_chronifysupport\hook_callbacks::js_value($baseurl) . ','
+        . '  name: ' . \local_chronifysupport\hook_callbacks::js_value(fullname($USER)) . ','
+        . '  email: ' . \local_chronifysupport\hook_callbacks::js_value((string) $USER->email) . ','
+        . '  moodle_uid: ' . (int) $USER->id
         . '});'
         // Relay the widget's own minimize/restore signal one level up to the
         // course page. This page is just a same-origin passthrough frame

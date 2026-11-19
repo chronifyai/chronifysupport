@@ -79,6 +79,14 @@ class hook_callbacks {
     protected static $trackinginjected = false;
 
     /**
+     * Idempotency flag for the signed-in session guard (see
+     * maybe_inject_session_guard()), same reason as the flags above.
+     *
+     * @var bool
+     */
+    protected static $guardinjected = false;
+
+    /**
      * Same idempotency concern as $buttoninjected/$trackinginjected above,
      * tracked separately again: the site-wide visitor beacon (see
      * maybe_inject_visitor_beacon()) is injected unconditionally, on every
@@ -104,6 +112,12 @@ class hook_callbacks {
         if (\local_chronifysupport\legacy_migration::old_plugin_present()) {
             return;
         }
+
+        // Must run before anything below that reads the stored widget
+        // session: it drops a previous user's session when a different
+        // Moodle user is now signed in, and records the "signed in in this
+        // tab" marker used by the login-page reset. See the method.
+        self::maybe_inject_session_guard($hook);
 
         // Independent of the button below (and of its own per-request
         // idempotency flag): if a support conversation is already open in
@@ -309,35 +323,247 @@ class hook_callbacks {
         $resetjs = '';
         if ($isloginpage) {
             // Two triggers, either one resets: (1) the session cookie is missing
-            // (browser was closed), (2) the login page was last seen more than 20 s
+            // (browser was closed), (2) the login page was last seen more than 10 s
             // ago (covers browsers that restore session cookies and tabs). The
-            // last-seen time is refreshed every 10 s while the page is open and
+            // last-seen time is refreshed every 5 s while the page is open and
             // again on every page unload (pagehide), so normal navigation between
             // pages never resets; only a closed browser leaves it stale.
+            $clearconvendpoint = ($supabaseurl !== '' && $supabaseanonkey !== '' && $clientid !== '')
+                ? rtrim($supabaseurl, '/') . '/rest/v1/rpc/clear_visitor_conversation'
+                : '';
             $resetjs = '(function() {'
                 . 'var name = \'local_chronifysupport_anon_alive\';'
                 . 'var seenKey = \'local_chronifysupport_anon_seen\';'
+                . 'var seenTabKey = \'local_chronifysupport_anon_seen_tab\';'
                 . 'function has() { return document.cookie.indexOf(name + \'=1\') !== -1; }'
-                . 'function touch() { try { window.localStorage.setItem(seenKey, '
-                . 'String(Date.now())); } catch (e) { /* best-effort */ } }'
+                . 'function touch() {'
+                . '  var tn = String(Date.now());'
+                . '  try { window.localStorage.setItem(seenKey, tn); } catch (e) { /* best-effort */ }'
+                // Tab copy of the same timestamp: Moodle 5 clears localStorage on every page
+                // load, but sessionStorage survives reloads (and tab restore) of this tab.
+                . '  try { window.sessionStorage.setItem(seenTabKey, tn); } catch (e) { /* best-effort */ }'
+                . '}'
+                // When the stored chat is dropped, also detach this browser from the
+                // conversation on the server (clear_visitor_conversation), so the
+                // agents' Visitors page and the reply-email rule stop treating the
+                // visitor as being in that chat. Best-effort; the callback always runs.
+                . 'var clearUrl = ' . self::js_value($clearconvendpoint) . ';'
+                . 'var clearKey = ' . self::js_value($supabaseanonkey) . ';'
+                . 'var clearClient = ' . self::js_value($clientid) . ';'
+                . 'function clearConv(cb) {'
+                . '  var done = false;'
+                . '  function fin() { if (!done) { done = true; if (cb) { cb(); } } }'
+                . '  try {'
+                . '    var vk = null;'
+                . '    try { vk = window.localStorage.getItem(\'local_chronifysupport_visitor_key\') || '
+                . 'window.localStorage.getItem(\'local_helpdesk_visitor_key\'); } catch (ev) { vk = null; }'
+                . '    if (!clearUrl || !clearKey || !clearClient || !vk) { fin(); return; }'
+                . '    fetch(clearUrl, {'
+                . '      method: \'POST\', keepalive: true,'
+                . '      headers: {\'Content-Type\': \'application/json\', '
+                . '\'apikey\': clearKey, \'Authorization\': \'Bearer \' + clearKey},'
+                . '      body: JSON.stringify({p_client_id: clearClient, p_visitor_key: vk})'
+                . '    }).then(fin, fin);'
+                . '    setTimeout(fin, 2000);'
+                . '  } catch (ec) { fin(); }'
+                . '}'
+                . 'var wiping = false;'
+                // Idle reset: the chat of this login page is dropped after 30 minutes without
+                // the page being seen (sleep, long absence). Navigates with replace(), a plain
+                // GET, so a login form that was submitted is never re-sent.
+                . 'var idleMs = 1800000;'
+                . 'function idleWipe() {'
+                . '  if (wiping) { return; }'
+                . '  wiping = true;'
+                . '  try { window.localStorage.removeItem(\'local_chronifysupport_session\'); } catch (ei1) { /* best-effort */ }'
+                . '  try { window.localStorage.removeItem(' . self::js_value($statekey) . '); } catch (ei2) { /* best-effort */ }'
+                . '  var ik = [\'local_chronifysupport_session_tab\', \'local_chronifysupport_panel_open\', '
+                . '\'local_chronifysupport_login_panel\', \'local_chronifysupport_keep\', \'local_chronifysupport_keep_session\'];'
+                . '  for (var ii = 0; ii < ik.length; ii++) { try { '
+                . 'window.sessionStorage.removeItem(ik[ii]); } catch (ei3) { /* best-effort */ } }'
+                . '  touch();'
+                . '  clearConv(function() { window.location.replace(window.location.href); });'
+                . '}'
                 . 'try {'
                 . '  var seen = 0;'
                 . '  try { seen = parseInt(window.localStorage.getItem(seenKey) || \'0\', 10) || 0; } catch (e1) { seen = 0; }'
-                . '  var stale = seen > 0 && (Date.now() - seen) > 20000;'
+                . '  var stale = seen > 0 && (Date.now() - seen) > 10000;'
+                . '  var seenTab = 0;'
+                . '  try { seenTab = parseInt(window.sessionStorage.getItem(seenTabKey) '
+                . '|| \'0\', 10) || 0; } catch (e1b) { seenTab = 0; }'
+                . '  var staleTab = seenTab > 0 && (Date.now() - seenTab) > 10000;'
+                . '  var idleLoad = seenTab > 0 && (Date.now() - seenTab) > idleMs;'
                 . '  var fresh = false;'
                 . '  if (!has()) {'
                 . '    document.cookie = name + \'=1; path=/; SameSite=Lax\' + '
                 . '(window.location.protocol === \'https:\' ? \'; Secure\' : \'\');'
                 . '    fresh = has();'
                 . '  }'
-                . '  if (fresh || stale) {'
+                // Just signed out in this very tab: the signed-in pages left a
+                // sessionStorage marker with the last-activity time (see
+                // maybe_inject_session_guard()). While that is under 5 minutes old, keep
+                // the chat instead of resetting it, so the person can still continue the
+                // conversation from the login page. Once the login page has used the marker
+                // it is marked as "resumed" (r: 1). A resumed chat survives only reloads
+                // of the login page (e.g. after a wrong password): if the login page was
+                // not seen for 10 s (tab closed and restored, browser reopened) it is
+                // dropped, so a restored tab never shows the previous user's chat.
+                . '  var keepKey = \'local_chronifysupport_keep\';'
+                . '  var keepMs = 300000;'
+                . '  var markerPresent = false;'
+                . '  var keepUid = null;'
+                . '  var keepLast = 0;'
+                . '  try {'
+                . '    var km = JSON.parse(window.sessionStorage.getItem(keepKey));'
+                . '    if (km && km.t) {'
+                . '      markerPresent = true;'
+                . '      var within = (Date.now() - km.t) < keepMs;'
+                . '      var resumed = km.r === 1;'
+                . '      if (within && (!resumed || (!stale && !staleTab && '
+                . '!fresh))) { keepUid = String(km.uid); keepLast = km.t; }'
+                . '    }'
+                . '  } catch (e7) { keepUid = null; }'
+                // The chat can only be shown if the tab-only session copy written by
+                // get_help.php is complete, belongs to the same Moodle user and has
+                // not expired (the token cannot be refreshed after logout).
+                . '  var keptKey = \'local_chronifysupport_keep_session\';'
+                . '  var kept = null;'
+                . '  if (keepUid !== null) {'
+                . '    try {'
+                . '      var ko = JSON.parse(window.sessionStorage.getItem(keptKey));'
+                . '      if (ko && ko.access_token && ko.user_id && ko.helpdesk_base_url && ko.name && ko.email'
+                . '        && String(ko.moodle_uid) === keepUid && ko.expires_at'
+                . '        && (new Date(ko.expires_at).getTime() - Date.now()) > 60000) { kept = ko; }'
+                . '    } catch (e14) { kept = null; }'
+                . '  }'
+                . '  var keep = kept !== null;'
+                // A marker that cannot be honoured (too old, restored tab, no valid session
+                // copy) is a sign-out leftover: reset and detach the conversation below.
+                . '  var forceReset = markerPresent && !keep;'
+                // A session copy marked "retained" (written above after a logout) is only
+                // valid in the tab that has the sessionStorage marker. In any other tab
+                // (a new tab, or the browser reopened) it is dropped straight away.
+                . '  var retainedLeft = false;'
+                . '  try {'
+                . '    var rs = JSON.parse(window.localStorage.getItem(\'local_chronifysupport_session\'));'
+                . '    retainedLeft = !!(rs && rs.retained === 1);'
+                . '  } catch (e22) { retainedLeft = false; }'
+                . '  var clearedNow = false;'
+                . '  if ((fresh || stale || retainedLeft || forceReset || idleLoad) && !keep) {'
+                . '    var hadSession = null;'
+                . '    try { hadSession = window.localStorage.getItem(\'local_chronifysupport_session\'); '
+                . '} catch (e23) { hadSession = null; }'
+                . '    try {'
+                . '      if (hadSession === null) { hadSession = '
+                . 'window.sessionStorage.getItem(\'local_chronifysupport_session_tab\'); }'
+                . '      window.sessionStorage.removeItem(\'local_chronifysupport_session_tab\');'
+                . '    } catch (e27) { /* best-effort */ }'
                 . '    window.localStorage.removeItem(\'local_chronifysupport_session\');'
                 . '    window.localStorage.removeItem(' . self::js_value($statekey) . ');'
                 . '    try { window.sessionStorage.removeItem(\'local_chronifysupport_panel_open\'); '
                 . '} catch (e2) { /* best-effort */ }'
+                . '    try { window.sessionStorage.removeItem(\'local_chronifysupport_login_panel\'); '
+                . '} catch (e33) { /* best-effort */ }'
+                . '    try { window.sessionStorage.removeItem(keptKey); } catch (e21) { /* best-effort */ }'
+. '    try { window.sessionStorage.removeItem(keepKey); } catch (e36) { /* best-effort */ }'
+                // Detach the browser from the dropped conversation: once right away and
+                // once more shortly after, in case the visitor beacon's first heartbeat
+                // (sent with the old conversation id) lands after the first call.
+                . '    if (hadSession !== null || forceReset) {'
+                . '      clearedNow = true;'
+                . '      clearConv(null);'
+                . '      setTimeout(function() { clearConv(null); }, 4000);'
+                . '    }'
+                . '  } else if (keep) {'
+                . '    try {'
+                . '      window.localStorage.setItem(\'local_chronifysupport_session\', JSON.stringify({'
+                . '        access_token: kept.access_token, expires_at: kept.expires_at, user_id: kept.user_id,'
+                . '        helpdesk_base_url: kept.helpdesk_base_url, name: kept.name, email: kept.email, retained: 1'
+                . '      }));'
+                . '    } catch (e15) { /* best-effort */ }'
+. '    try { window.sessionStorage.setItem(keepKey, JSON.stringify({uid: '
+. 'keepUid, t: keepLast, r: 1})); } catch (e37) { /* best-effort */ }'
+                // Show "Continue chat" on the button like on the signed-in pages.
+                . '    try {'
+                . '      var sv = window.localStorage.getItem(\'local_chronifysupport_chat_active_\' + keepUid);'
+                . '      if (sv) { window.localStorage.setItem(' . self::js_value($statekey) . ', sv); }'
+                . '    } catch (e8) { /* best-effort */ }'
+                // Idle auto-clear: no mouse/keyboard activity in this page for
+                // 5 minutes wipes the retained chat and reloads a clean login page.
+                . '    var lastBump = 0;'
+                . '    var bump = function() {'
+                . '      var n = Date.now();'
+                . '      if (n - lastBump < 5000) { return; }'
+                . '      lastBump = n; keepLast = n;'
+                . '      try { window.sessionStorage.setItem(keepKey, JSON.stringify({uid: '
+                . 'keepUid, t: n, r: 1})); } catch (e9) { /* best-effort */ }'
+                . '    };'
+                . '    var kevs = [\'mousemove\', \'keydown\', \'pointerdown\', \'scroll\', \'touchstart\'];'
+                . '    for (var ki = 0; ki < kevs.length; ki++) { window.addEventListener(kevs[ki], bump, {passive: true}); }'
+                . '    setInterval(function() {'
+                . '      if (Date.now() - keepLast <= keepMs) { return; }'
+                . '      if (wiping) { return; }'
+                . '      wiping = true;'
+                . '      try { window.localStorage.removeItem(\'local_chronifysupport_session\'); '
+                . '} catch (e10) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_session_tab\'); '
+                . '} catch (e28) { /* best-effort */ }'
+                . '      try { window.localStorage.removeItem('
+                . self::js_value($statekey)
+                . '); } catch (e11) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_panel_open\'); '
+                . '} catch (e12) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_login_panel\'); '
+                . '} catch (e34) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(keepKey); } catch (e13) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(keptKey); } catch (e16) { /* best-effort */ }'
+                . '      clearConv(function() { window.location.reload(); });'
+                . '    }, 15000);'
+                // The token cannot be renewed after logout: when it expires, drop the
+                // chat and show a clean login page (emails take over from there).
+                . '    setTimeout(function() {'
+                . '      if (wiping) { return; }'
+                . '      wiping = true;'
+                . '      try { window.localStorage.removeItem(\'local_chronifysupport_session\'); '
+                . '} catch (e17) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_session_tab\'); '
+                . '} catch (e29) { /* best-effort */ }'
+                . '      try { window.localStorage.removeItem('
+                . self::js_value($statekey)
+                . '); } catch (e18) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_panel_open\'); '
+                . '} catch (e19) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_login_panel\'); '
+                . '} catch (e35) { /* best-effort */ }'
+                . '      try { window.sessionStorage.removeItem(keptKey); } catch (e20) { /* best-effort */ }'
+                . '      clearConv(function() { window.location.reload(); });'
+                . '    }, Math.max(1000, new Date(kept.expires_at).getTime() - Date.now() - 30000));'
+                . '  }'
+                // No stored chat and nothing retained: this browser cannot be in a chat, so
+                // make sure no conversation stays attached to it on the server (left over
+                // from an older session). Once per tab; a no-op when nothing is attached.
+                . '  if (!keep && !clearedNow) {'
+                . '    var noSession = true;'
+                . '    try {'
+                . '      noSession = window.localStorage.getItem(\'local_chronifysupport_session\') === null'
+                . ' && window.sessionStorage.getItem(\'local_chronifysupport_session_tab\') === null;'
+                . '    } catch (e24) { noSession = false; }'
+                . '    var orphanKey = \'local_chronifysupport_conv_cleared\';'
+                . '    var orphanDone = false;'
+                . '    try { orphanDone = window.sessionStorage.getItem(orphanKey) === \'1\'; } catch (e25) { orphanDone = true; }'
+                . '    if (noSession && !orphanDone) {'
+                . '      try { window.sessionStorage.setItem(orphanKey, \'1\'); } catch (e26) { /* best-effort */ }'
+                . '      clearConv(null);'
+                . '      setTimeout(function() { clearConv(null); }, 4000);'
+                . '    }'
                 . '  }'
                 . '  touch();'
-                . '  setInterval(touch, 10000);'
+                . '  setInterval(function() {'
+                . '    var tp = 0;'
+                . '    try { tp = parseInt(window.sessionStorage.getItem(seenTabKey) || \'0\', 10) || 0; } catch (et1) { tp = 0; }'
+                . '    if (tp > 0 && (Date.now() - tp) > idleMs) { idleWipe(); return; }'
+                . '    touch();'
+                . '  }, 5000);'
                 . '  window.addEventListener(\'pagehide\', touch);'
                 . '} catch (e) { /* best-effort */ }'
                 . '})();';
@@ -347,6 +573,94 @@ class hook_callbacks {
             . ($resetjs !== '' ? \html_writer::script($resetjs) : '')
             . \html_writer::script($js) . \html_writer::script($statejs));
         self::$buttoninjected = true;
+    }
+
+    /**
+     * Signed-in session guard (tiny inline script, signed-in pages only).
+     *
+     * 1. Remembers which Moodle user the stored widget session belongs to
+     *    (localStorage 'local_chronifysupport_session_uid'). If a different
+     *    user is signed in now, the previous user's stored widget session,
+     *    "Continue chat" state and open-panel flag are dropped before any
+     *    other script reads them, so a conversation is never carried over
+     *    to another person on a shared computer.
+     * 2. Keeps a "signed in in this tab" marker with the last-activity time
+     *    in sessionStorage ('local_chronifysupport_keep'). sessionStorage
+     *    is not cleared by reloads of the tab. After logging out, the login
+     *    page uses the marker to keep showing the chat for a short idle
+     *    window (5 minutes) instead of resetting it; a restored or reopened
+     *    tab never shows it (see before_footer()).
+     *
+     * Best-effort: any failure leaves the page exactly as it was.
+     *
+     * @param \core\hook\output\before_footer_html_generation $hook
+     */
+    protected static function maybe_inject_session_guard(\core\hook\output\before_footer_html_generation $hook): void {
+        global $USER, $PAGE;
+
+        if (self::$guardinjected) {
+            return;
+        }
+        if ($PAGE->pagetype === 'login-index') {
+            return;
+        }
+        if (!isloggedin() || isguestuser()) {
+            return;
+        }
+        if (empty(get_config('local_chronifysupport', 'enable_button'))) {
+            return;
+        }
+
+        $js = '(function() {'
+            . 'try {'
+            . '  var uid = ' . (int) $USER->id . ';'
+            // The login-page chat copy of this tab is obsolete once someone is signed in.
+            . '  try { window.sessionStorage.removeItem(\'local_chronifysupport_session_tab\'); } catch (e30) { /* best-effort */ }'
+            . '  var sessKey = \'local_chronifysupport_session\';'
+            . '  var uidKey = \'local_chronifysupport_session_uid\';'
+            . '  var keepKey = \'local_chronifysupport_keep\';'
+            . '  var prev = null;'
+            . '  try { prev = window.localStorage.getItem(uidKey); } catch (e1) { prev = null; }'
+            . '  if (prev !== null && prev !== String(uid)) {'
+            . '    try { window.localStorage.removeItem(sessKey); } catch (e2) { /* best-effort */ }'
+            . '    try { window.localStorage.removeItem(\'local_chronifysupport_chat_active_anon\'); '
+            . '} catch (e3) { /* best-effort */ }'
+            // An open panel that the visitor opened on the login page of this tab is theirs, not
+            // the previous user's: it stays open after logging in. Anything else is dropped.
+            . '    var loginPanel = null;'
+            . '    try { loginPanel = window.sessionStorage.getItem(\'local_chronifysupport_login_panel\'); '
+            . '} catch (e31) { loginPanel = null; }'
+            . '    if (loginPanel !== \'1\') {'
+            . '      try { window.sessionStorage.removeItem(\'local_chronifysupport_panel_open\'); '
+            . '} catch (e4) { /* best-effort */ }'
+            . '    }'
+            . '  }'
+            // The marker has done its job on the first signed-in page.
+            . '  try { window.sessionStorage.removeItem(\'local_chronifysupport_login_panel\'); } catch (e32) { /* best-effort */ }'
+            . '  try { window.localStorage.setItem(uidKey, String(uid)); } catch (e5) { /* best-effort */ }'
+            // A tab-only copy of another user's session (see get_help.php) must not survive a user switch.
+            . '  try {'
+            . '    var ks = JSON.parse(window.sessionStorage.getItem(\'local_chronifysupport_keep_session\'));'
+            . '    if (ks && String(ks.moodle_uid) !== String(uid)) { '
+            . 'window.sessionStorage.removeItem(\'local_chronifysupport_keep_session\'); }'
+            . '  } catch (e8) { /* best-effort */ }'
+            . '  var last = 0;'
+            . '  function mark() {'
+            . '    var now = Date.now();'
+            . '    if (now - last < 5000) { return; }'
+            . '    last = now;'
+            . '    try { window.sessionStorage.setItem(keepKey, JSON.stringify({uid: '
+            . 'uid, t: now})); } catch (e6) { /* best-effort */ }'
+            . '  }'
+            . '  mark();'
+            . '  var evs = [\'mousemove\', \'keydown\', \'pointerdown\', \'scroll\', \'touchstart\'];'
+            . '  for (var i = 0; i < evs.length; i++) { window.addEventListener(evs[i], mark, {passive: true}); }'
+            . '  window.addEventListener(\'pagehide\', function() { last = 0; mark(); });'
+            . '} catch (e) { /* best-effort */ }'
+            . '})();';
+
+        $hook->add_html(\html_writer::script($js));
+        self::$guardinjected = true;
     }
 
     /**
@@ -555,25 +869,25 @@ class hook_callbacks {
     protected static function maybe_merge_anonymous_identity(): void {
         global $USER;
 
-        // The pre-rename cookie (local_helpdesk_pending_anon) is still honoured so a
-        // visitor who was mid-login during the upgrade is not left unmerged.
-        $pendingraw = $_COOKIE['local_chronifysupport_pending_anon'] ?? ($_COOKIE['local_helpdesk_pending_anon'] ?? '');
-        if (!isloggedin() || isguestuser() || empty($pendingraw)) {
+        // Only the signed cookie of this plugin is accepted. The pre-rename cookie
+        // (local_helpdesk_pending_anon) is no longer read; it is only cleared.
+        $pendingraw = (string) ($_COOKIE['local_chronifysupport_pending_anon'] ?? '');
+        if (!isloggedin() || isguestuser() || $pendingraw === '') {
             return;
         }
 
-        $pending = json_decode($pendingraw, true);
-        if (empty($pending['external_user_id'])) {
-            // Malformed cookie -- clear it so we don't keep re-parsing junk
-            // on every subsequent page view for this visitor.
+        $pending = anonymous_endpoint::read_pending_cookie($pendingraw);
+        if ($pending === null) {
+            // Malformed, unsigned or forged cookie -- clear it so we don't keep
+            // re-parsing junk on every subsequent page view for this visitor.
             setcookie('local_chronifysupport_pending_anon', '', time() - 3600, '/');
             setcookie('local_helpdesk_pending_anon', '', time() - 3600, '/');
             return;
         }
 
-        // Only merge when the cookie is recent. A cookie without an issue time
-        // (older format) or older than the window is discarded, never merged.
-        $age = isset($pending['ts']) ? time() - (int) $pending['ts'] : -1;
+        // Only merge when the cookie is recent. A cookie older than the window
+        // (or issued in the future) is discarded, never merged.
+        $age = time() - $pending['ts'];
         if ($age < 0 || $age > self::PENDING_ANON_MAX_AGE) {
             setcookie('local_chronifysupport_pending_anon', '', time() - 3600, '/');
             setcookie('local_helpdesk_pending_anon', '', time() - 3600, '/');
@@ -1133,6 +1447,11 @@ class hook_callbacks {
             . 'var backdrop = null;'
             . 'var pushedHeaderEls = [];'
             . 'var panelActive = false;'
+            // instantPush: apply the push of the page content without animation when the panel is
+            // re-opened while the page loads (so the theme sees the final width at once).
+            // ignoreResize: our own synthetic resize event must not trigger handleResize().
+            . 'var instantPush = false;'
+            . 'var ignoreResize = false;'
             . 'function setPanelOpen(open) {'
             . '  try {'
             . '    if (open) { window.sessionStorage.setItem(panelStorageKey, \'1\'); }'
@@ -1188,12 +1507,12 @@ class hook_callbacks {
             . '      if (!isWide && rect.height < 150) { continue; }'
             . '      if (!isWide && canUseRightInset) {'
             . '        pushedHeaderEls.push({ el: el, mode: \'right\', right: el.style.right, transition: el.style.transition });'
-            . '        el.style.transition = \'right .2s ease\';'
+            . '        el.style.transition = instantPush ? \'none\' : \'right .2s ease\';'
             . '        el.style.right = \'calc(\' + cs.right + \' + \' + panelWidth + \')\';'
             . '      } else {'
             . '        pushedHeaderEls.push({ el: el, mode: \'width\', '
             . 'maxWidth: el.style.maxWidth, transition: el.style.transition });'
-            . '        el.style.transition = \'max-width .2s ease\';'
+            . '        el.style.transition = instantPush ? \'none\' : \'max-width .2s ease\';'
             . '        el.style.maxWidth = \'calc(100vw - \' + panelWidth + \')\';'
             . '      }'
             . '    }'
@@ -1210,7 +1529,15 @@ class hook_callbacks {
             . '    pushedHeaderEls = [];'
             . '  }'
             . '}'
+            . 'function restoreTransitions() {'
+            . '  document.body.style.transition = \'margin-right .2s ease\';'
+            . '  for (var k = 0; k < pushedHeaderEls.length; k++) {'
+            . '    var pe = pushedHeaderEls[k];'
+            . '    pe.el.style.transition = pe.mode === \'right\' ? \'right .2s ease\' : \'max-width .2s ease\';'
+            . '  }'
+            . '}'
             . 'function pushBody(active) {'
+            . '  var instant = instantPush && active;'
             . '  var noPushLayouts = [\'pagelayout-login\', \'pagelayout-maintenance\'];'
             . '  var canPush = window.innerWidth >= PUSH_MIN_VIEWPORT;'
             . '  if (canPush) {'
@@ -1225,15 +1552,25 @@ class hook_callbacks {
             . '    return;'
             . '  }'
             . '  hideOverlay();'
-            . '  document.body.style.transition = \'margin-right .2s ease\';'
+            . '  document.body.style.transition = instant ? \'none\' : \'margin-right .2s ease\';'
             . '  document.body.style.marginRight = active ? panelWidth : \'\';'
             . '  pushFixedHeaders(active);'
+            . '  if (instant) {'
+            . '    void document.body.offsetWidth;'
+            . '    var frames = 0;'
+            . '    var settle = function() {'
+            . '      if (++frames < 3) { requestAnimationFrame(settle); return; }'
+            . '      restoreTransitions();'
+            . '    };'
+            . '    requestAnimationFrame(settle);'
+            . '  }'
             . '}'
             . 'function handleResize() {'
             . '  if (panelActive) { pushBody(true); }'
             . '}'
             . 'var resizeTimer = null;'
             . 'window.addEventListener(\'resize\', function() {'
+            . '  if (ignoreResize) { return; }'
             . '  clearTimeout(resizeTimer);'
             . '  resizeTimer = setTimeout(handleResize, 150);'
             . '});'
@@ -1315,7 +1652,21 @@ class hook_callbacks {
             . '});'
             . 'btn.addEventListener(\'click\', function() { showPanel(); });'
             . 'try {'
-            . '  if (window.sessionStorage.getItem(panelStorageKey) === \'1\') { showPanel(); }'
+            . '  if (window.sessionStorage.getItem(panelStorageKey) === \'1\') {'
+            . '    instantPush = true;'
+            . '    showPanel();'
+            . '    instantPush = false;'
+            // Some themes only re-measure their menu on a window resize: send one after the page
+            // has loaded so the header fits the narrower page.
+            . '    var notifyTheme = function() {'
+            . '      setTimeout(function() {'
+            . '        try { ignoreResize = true; window.dispatchEvent(new Event(\'resize\')); } catch (e2) { /* best-effort */ }'
+            . '        ignoreResize = false;'
+            . '      }, 300);'
+            . '    };'
+            . '    if (document.readyState === \'complete\') { notifyTheme(); }'
+            . '    else { window.addEventListener(\'load\', notifyTheme); }'
+            . '  }'
             . '} catch (e) { /* best-effort: panel just starts closed like before */ }'
             . '})();';
     }
@@ -1494,6 +1845,12 @@ class hook_callbacks {
             . 'var backdrop = null;'
             . 'var pushedHeaderEls = [];'
             . 'var panelActive = false;'
+            // Below this viewport width the panel covers most of the login form, so a
+            // click outside it still closes it (old behaviour). On wider screens the
+            // form stays usable next to the panel: no dimming layer, clicks reach the
+            // page (e.g. the username/password fields) and the panel stays open until
+            // the visitor minimizes it.
+            . 'var LOGIN_CLICK_CLOSE_MAX_VIEWPORT = 900;'
             . 'function showOverlay() {'
             . '  if (!backdrop) {'
             . '    backdrop = document.createElement(\'div\');'
@@ -1503,8 +1860,9 @@ class hook_callbacks {
             . '    backdrop.addEventListener(\'click\', function() { hidePanel(); });'
             . '    document.body.appendChild(backdrop);'
             . '  }'
-            . '  backdrop.style.pointerEvents = \'auto\';'
-            . '  requestAnimationFrame(function() { backdrop.style.opacity = \'1\'; });'
+            . '  var closesOnClick = window.innerWidth < LOGIN_CLICK_CLOSE_MAX_VIEWPORT;'
+            . '  backdrop.style.pointerEvents = closesOnClick ? \'auto\' : \'none\';'
+            . '  requestAnimationFrame(function() { backdrop.style.opacity = closesOnClick ? \'1\' : \'0\'; });'
             . '}'
             . 'function hideOverlay() {'
             . '  if (!backdrop) { return; }'
@@ -1591,14 +1949,25 @@ class hook_callbacks {
             . '  resizeTimer = setTimeout(handleResize, 150);'
             . '});'
             . 'var panelStorageKey = \'local_chronifysupport_panel_open\';'
+            // Marker "this visitor opened the panel on the login page": the signed-in session
+            // guard keeps the open panel across a login as another user when it is set.
+            . 'var loginPanelKey = \'local_chronifysupport_login_panel\';'
             . 'function setPanelOpen(open) {'
             . '  try {'
-            . '    if (open) { window.sessionStorage.setItem(panelStorageKey, \'1\'); }'
-            . '    else { window.sessionStorage.removeItem(panelStorageKey); }'
+            . '    if (open) {'
+            . '      window.sessionStorage.setItem(panelStorageKey, \'1\');'
+            . '      window.sessionStorage.setItem(loginPanelKey, \'1\');'
+            . '    } else {'
+            . '      window.sessionStorage.removeItem(panelStorageKey);'
+            . '      window.sessionStorage.removeItem(loginPanelKey);'
+            . '    }'
             . '  } catch (e) { /* best-effort: worst case the panel just won\'t auto-reopen on the next page */ }'
             . '}'
             . 'var stylesInjected = false;'
             . 'var sessionStorageKey = \'local_chronifysupport_session\';'
+            // Copy of the chat session kept in sessionStorage (this tab only). Moodle itself
+            // can empty localStorage while a page loads, which would otherwise lose the chat.
+            . 'var sessionCopyKey = \'local_chronifysupport_session_tab\';'
             // Same client-generated visitor_key + storage-key/cookie-fallback
             // scheme as build_visitor_beacon_js()'s own getVisitorKey() (see
             // that function for the full rationale) -- duplicated here rather
@@ -1654,11 +2023,35 @@ class hook_callbacks {
             // who submits this form and gets a ticket keeps showing up under
             // "All other visitors" on the agent Visitors page forever, since
             // nothing ever tells that row which conversation belongs to it.
+            . 'function readSessionObject(storage, key) {'
+            . '  var value = null;'
+            . '  try { value = JSON.parse(storage.getItem(key)); } catch (e) { value = null; }'
+            . '  return (value && typeof value === \'object\') ? value : null;'
+            . '}'
+            . 'function isCompleteSession(session) {'
+            . '  return !!(session && session.access_token && session.user_id && session.helpdesk_base_url'
+            . ' && session.name && session.email);'
+            . '}'
+            // The stored session: localStorage when it holds a complete session, otherwise the
+            // copy of this tab (plus any fields localStorage still has, such as conversation_id).
+            . 'function currentSession() {'
+            . '  var stored = readSessionObject(window.localStorage, sessionStorageKey);'
+            . '  if (isCompleteSession(stored)) { return stored; }'
+            . '  var copy = readSessionObject(window.sessionStorage, sessionCopyKey);'
+            . '  if (!isCompleteSession(copy)) { return stored; }'
+            . '  var merged = {};'
+            . '  var key;'
+            . '  for (key in copy) { merged[key] = copy[key]; }'
+            . '  if (stored) { for (key in stored) { merged[key] = stored[key]; } }'
+            . '  return merged;'
+            . '}'
             . 'function saveSession(patch) {'
-            . '  var current = {};'
-            . '  try { current = JSON.parse(window.localStorage.getItem(sessionStorageKey)) || {}; } catch (e) { current = {}; }'
+            . '  var current = currentSession() || {};'
             . '  for (var k in patch) { current[k] = patch[k]; }'
             . '  try { window.localStorage.setItem(sessionStorageKey, JSON.stringify(current)); } catch (e) { /* best-effort */ }'
+            . '  if (isCompleteSession(current)) {'
+            . '    try { window.sessionStorage.setItem(sessionCopyKey, JSON.stringify(current)); } catch (e) { /* best-effort */ }'
+            . '  }'
             . '}'
             // Lets showPanel() decide whether a freshly (re)created panel
             // can jump straight to renderWidget() -- silently reconnecting
@@ -1666,10 +2059,8 @@ class hook_callbacks {
             // because no usable session was ever established, or it has
             // since expired.
             . 'function getStoredSession() {'
-            . '  var session;'
-            . '  try { session = JSON.parse(window.localStorage.getItem(sessionStorageKey)); } catch (e) { session = null; }'
-            . '  if (!session || !session.access_token || !session.user_id || !session.helpdesk_base_url'
-            . ' || !session.name || !session.email) { return null; }'
+            . '  var session = currentSession();'
+            . '  if (!isCompleteSession(session)) { return null; }'
             . '  if (session.expires_at && new Date(session.expires_at).getTime() <= Date.now()) { return null; }'
             . '  return session;'
             . '}'
@@ -1885,7 +2276,8 @@ class hook_callbacks {
             . '    fetch(submitUrl, {'
             . '      method: \'POST\','
             . '      headers: {\'Content-Type\': \'application/json\'},'
-            . '      body: JSON.stringify({name: name, email: email, website: honeypot.value})'
+            . '      body: JSON.stringify({name: name, email: email, visitor_key: getVisitorKey(),'
+            . ' website: honeypot.value})'
             . '    })'
             . '      .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })'
             . '      .then(function(result) {'
@@ -2397,7 +2789,7 @@ class hook_callbacks {
             . '    fetch(refreshUrl, {'
             . '      method: \'POST\','
             . '      headers: {\'Content-Type\': \'application/json\'},'
-            . '      body: JSON.stringify({name: name, email: email})'
+            . '      body: JSON.stringify({name: name, email: email, visitor_key: getVisitorKey()})'
             . '    })'
             . '      .then(function(r) { return r.json(); })'
             . '      .then(function(data) {'
@@ -2413,7 +2805,10 @@ class hook_callbacks {
             . '      })'
             . '      .catch(function() { /* best-effort: widget just keeps its current token until natural expiry */ });'
             . '  }'
-            . '  scheduleRefresh(sessiondata.expires_at);'
+            // A session retained after Moodle logout belongs to the real account;
+            // the anonymous refresh would switch to a different identity, so it is
+            // never refreshed (it simply expires, see before_footer()).
+            . '  if (!sessiondata.retained) { scheduleRefresh(sessiondata.expires_at); }'
             . '}'
             . 'function hidePanel() {'
             . '  if (panel) { panel.style.transform = \'translateX(100%)\'; }'
