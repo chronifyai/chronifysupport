@@ -465,7 +465,7 @@ class hook_callbacks {
                 . '    try { window.sessionStorage.removeItem(\'local_chronifysupport_login_panel\'); '
                 . '} catch (e33) { /* best-effort */ }'
                 . '    try { window.sessionStorage.removeItem(keptKey); } catch (e21) { /* best-effort */ }'
-. '    try { window.sessionStorage.removeItem(keepKey); } catch (e36) { /* best-effort */ }'
+                . '    try { window.sessionStorage.removeItem(keepKey); } catch (e36) { /* best-effort */ }'
                 // Detach the browser from the dropped conversation: once right away and
                 // once more shortly after, in case the visitor beacon's first heartbeat
                 // (sent with the old conversation id) lands after the first call.
@@ -481,8 +481,8 @@ class hook_callbacks {
                 . '        helpdesk_base_url: kept.helpdesk_base_url, name: kept.name, email: kept.email, retained: 1'
                 . '      }));'
                 . '    } catch (e15) { /* best-effort */ }'
-. '    try { window.sessionStorage.setItem(keepKey, JSON.stringify({uid: '
-. 'keepUid, t: keepLast, r: 1})); } catch (e37) { /* best-effort */ }'
+                . '    try { window.sessionStorage.setItem(keepKey, JSON.stringify({uid: '
+                . 'keepUid, t: keepLast, r: 1})); } catch (e37) { /* best-effort */ }'
                 // Show "Continue chat" on the button like on the signed-in pages.
                 . '    try {'
                 . '      var sv = window.localStorage.getItem(\'local_chronifysupport_chat_active_\' + keepUid);'
@@ -1447,9 +1447,9 @@ class hook_callbacks {
             . 'var backdrop = null;'
             . 'var pushedHeaderEls = [];'
             . 'var panelActive = false;'
-            // instantPush: apply the push of the page content without animation when the panel is
-            // re-opened while the page loads (so the theme sees the final width at once).
-            // ignoreResize: our own synthetic resize event must not trigger handleResize().
+            // The instantPush flag applies the push of the page content without animation when the
+            // panel is re-opened while the page loads (so the theme sees the final width at once).
+            // The ignoreResize flag keeps our own synthetic resize event from triggering handleResize().
             . 'var instantPush = false;'
             . 'var ignoreResize = false;'
             . 'function setPanelOpen(open) {'
